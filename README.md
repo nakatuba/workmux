@@ -307,6 +307,12 @@ branch.
 - `basename`: Use only the part after the last `/` (e.g., `prj-123/feature` →
   `feature`)
 
+`worktree_prefix` supports a `{project}` placeholder for the main worktree's
+directory name, so a global config can namespace each repo (e.g.
+`worktree_prefix: "{project}="` with `worktree_dir: "../"` creates
+`../myproj=feat-add-login`). The prefix is kept as written rather than
+slugified, and may only contain letters, digits, `-`, `_` and `=`.
+
 #### Panes
 
 Define your multiplexer pane layout with the `panes` array. For multiple windows in

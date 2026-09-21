@@ -6,7 +6,9 @@ use crate::config::Config;
 /// Derives the "handle" (worktree dir name + tmux window base name)
 /// from the branch name, optional explicit override, and config.
 ///
-/// The handle is always slugified to ensure filesystem/tmux compatibility.
+/// The branch-derived part is always slugified to ensure filesystem/tmux
+/// compatibility. A configured `worktree_prefix` is kept verbatim so
+/// separators such as `=` survive, and is validated instead.
 ///
 /// Priority:
 /// 1. Explicit name (--name flag) - bypasses all config (including prefix)
@@ -20,21 +22,59 @@ pub fn derive_handle(
     let handle = if let Some(name) = explicit_name {
         derive_target_name(name)?
     } else {
-        // Apply naming strategy
-        let derived = config.worktree_naming.derive_name(branch_name);
+        // Apply naming strategy, slugifying only the branch-derived part
+        let derived = slugify(config.worktree_naming.derive_name(branch_name));
 
         // Apply prefix if configured
-        let with_prefix = if let Some(ref prefix) = config.worktree_prefix {
+        if let Some(ref prefix) = config.worktree_prefix {
+            validate_worktree_prefix(prefix)?;
             format!("{}{}", prefix, derived)
         } else {
             derived
-        };
-
-        slugify(&with_prefix)
+        }
     };
 
     validate_handle(&handle)?;
     Ok(handle)
+}
+
+/// Validates a configured `worktree_prefix`.
+///
+/// The prefix is inserted verbatim into worktree directory names and
+/// multiplexer window/session names, so it is restricted to characters that
+/// are safe for both: ASCII alphanumerics, `-`, `_` and `=`. This rejects
+/// path separators, tmux-hostile `.`/`:`, and whitespace.
+fn validate_worktree_prefix(prefix: &str) -> Result<()> {
+    if prefix.contains('{') || prefix.contains('}') {
+        bail!(
+            "worktree_prefix '{}' contains an unknown placeholder \
+             (only '{{project}}' is supported)",
+            prefix
+        );
+    }
+
+    // A leading '-' looks like a CLI flag, and tmux treats leading '=' and '$'
+    // as target name syntax.
+    if prefix.starts_with(['-', '=', '$']) {
+        bail!(
+            "worktree_prefix '{}' cannot start with '-', '=' or '$'",
+            prefix
+        );
+    }
+
+    if let Some(invalid) = prefix
+        .chars()
+        .find(|c| !crate::util::is_worktree_prefix_char(*c))
+    {
+        bail!(
+            "worktree_prefix '{}' contains an invalid character '{}' \
+             (allowed: A-Z, a-z, 0-9, '-', '_', '=')",
+            prefix,
+            invalid
+        );
+    }
+
+    Ok(())
 }
 
 pub fn derive_target_name(name: &str) -> Result<String> {
@@ -202,6 +242,53 @@ mod tests {
         assert_eq!(result, "api-prj-feature");
     }
 
+    #[test]
+    fn derive_handle_prefix_preserves_equals_separator() {
+        let result =
+            derive_handle("feat/add-login", None, &config_with_prefix("workmux=")).unwrap();
+        assert_eq!(result, "workmux=feat-add-login");
+    }
+
+    #[test]
+    fn derive_handle_prefix_preserves_underscore_and_case() {
+        let result = derive_handle("feature", None, &config_with_prefix("Web_")).unwrap();
+        assert_eq!(result, "Web_feature");
+    }
+
+    #[test]
+    fn derive_handle_prefix_rejects_whitespace() {
+        let err = derive_handle("feature", None, &config_with_prefix("web ")).unwrap_err();
+        assert!(err.to_string().contains("invalid character"), "{err}");
+    }
+
+    #[test]
+    fn derive_handle_prefix_rejects_path_separator() {
+        let err = derive_handle("feature", None, &config_with_prefix("web/")).unwrap_err();
+        assert!(err.to_string().contains("invalid character"), "{err}");
+    }
+
+    #[test]
+    fn derive_handle_prefix_rejects_tmux_hostile_characters() {
+        for prefix in ["web.", "web:"] {
+            let err = derive_handle("feature", None, &config_with_prefix(prefix)).unwrap_err();
+            assert!(err.to_string().contains("invalid character"), "{err}");
+        }
+    }
+
+    #[test]
+    fn derive_handle_prefix_rejects_leading_target_syntax() {
+        for prefix in ["-web", "=web", "$web"] {
+            let err = derive_handle("feature", None, &config_with_prefix(prefix)).unwrap_err();
+            assert!(err.to_string().contains("cannot start with"), "{err}");
+        }
+    }
+
+    #[test]
+    fn derive_handle_prefix_rejects_unexpanded_placeholder() {
+        let err = derive_handle("feature", None, &config_with_prefix("{proj}=")).unwrap_err();
+        assert!(err.to_string().contains("unknown placeholder"), "{err}");
+    }
+
     // === Combined basename + prefix tests ===
 
     #[test]
@@ -220,6 +307,17 @@ mod tests {
         let result =
             derive_handle("feature", None, &config_with_basename_and_prefix("api-")).unwrap();
         assert_eq!(result, "api-feature");
+    }
+
+    #[test]
+    fn derive_handle_basename_and_project_style_prefix() {
+        let result = derive_handle(
+            "prj-4120/feature",
+            None,
+            &config_with_basename_and_prefix("workmux="),
+        )
+        .unwrap();
+        assert_eq!(result, "workmux=feature");
     }
 
     // === Error cases ===

@@ -23,6 +23,8 @@ editUrl: https://github.com/raine/workmux/edit/main/CHANGELOG.md
 
 ## Unreleased
 
+- Support the `{project}` placeholder in `worktree_prefix`, so a global config can namespace worktrees per repository, such as `worktree_prefix: "{project}="` alongside `worktree_dir: "../"`. The prefix is now kept as written instead of being slugified with the branch name, so separators like `=` survive, uppercase and `_` are preserved, and an unusable prefix fails with an error instead of being silently rewritten.
+
 ## v0.1.264 (2026-09-21)
 
 - Add an opt-in `window` column to the dashboard's agent table for showing tmux window indexes. ([#227](https://github.com/raine/workmux/pull/227))

@@ -157,6 +157,21 @@ Custom colors persist when cycling themes with `T`.
 - `full`: Use the full branch name (slashes become dashes)
 - `basename`: Use only the part after the last `/` (e.g., `prj-123/feature` → `feature`)
 
+`worktree_prefix` supports a `{project}` placeholder for the main worktree's
+directory name, which is useful in a global config when worktrees live next to
+their repository:
+
+```yaml
+worktree_dir: "../"
+worktree_prefix: "{project}="
+```
+
+With that config, branch `feat/add-login` in repository `myproj` creates the
+worktree `../myproj=feat-add-login`. Unlike the branch-derived part of the name,
+the prefix is kept as written, so separators such as `=` survive. It may only
+contain letters, digits, `-`, `_` and `=`, and cannot start with `-`, `=` or
+`$`; anything else is rejected with an error.
+
 ### Panes
 
 Define your multiplexer pane layout with the `panes` array. For multiple windows in session mode, use [windows](#windows) instead (they are mutually exclusive).

@@ -6,7 +6,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tracing::debug;
 
-use crate::util::{PROJECT_PLACEHOLDER, expand_project_placeholder};
+use crate::util::{
+    PROJECT_PLACEHOLDER, expand_project_placeholder, expand_project_placeholder_sanitized,
+};
 use crate::{cmd, git, nerdfont};
 use which::{which, which_in};
 
@@ -2552,11 +2554,24 @@ impl Config {
         // Expand `{project}` against the main worktree so every worktree of a
         // repository resolves the same prefix, whatever directory it runs from.
         // Outside a repository there is no project, so the template stands.
-        if let Some(prefix) = config.window_prefix.as_deref()
-            && prefix.contains(PROJECT_PLACEHOLDER)
+        let needs_project = |value: &Option<String>| {
+            value
+                .as_deref()
+                .is_some_and(|value| value.contains(PROJECT_PLACEHOLDER))
+        };
+        if (needs_project(&config.window_prefix) || needs_project(&config.worktree_prefix))
             && let Ok(main_root) = git::get_main_worktree_root_in(Some(start_dir))
         {
-            config.window_prefix = Some(expand_project_placeholder(prefix, &main_root)?);
+            if let Some(prefix) = config.window_prefix.as_deref() {
+                config.window_prefix = Some(expand_project_placeholder(prefix, &main_root)?);
+            }
+            // The worktree prefix becomes a directory name and a multiplexer
+            // name, so the project name is sanitized while the literal part of
+            // the template is preserved verbatim.
+            if let Some(prefix) = config.worktree_prefix.as_deref() {
+                config.worktree_prefix =
+                    Some(expand_project_placeholder_sanitized(prefix, &main_root)?);
+            }
         }
 
         debug!(
@@ -3209,7 +3224,10 @@ pub const EXAMPLE_PROJECT_CONFIG: &str = r#"# workmux project configuration
 # Options: full (default), basename (part after last '/').
 # worktree_naming: basename
 
-# Prefix added to worktree directories and tmux window names.
+# Prefix added to worktree directories and tmux window names. Supports
+# `{project}` for the main worktree's directory name, so a global config can
+# namespace each repo, e.g. `{project}=`. Allowed characters: letters, digits,
+# '-', '_' and '='.
 # worktree_prefix: ""
 
 # Prefix for tmux window and session names. Supports `{project}` for the main

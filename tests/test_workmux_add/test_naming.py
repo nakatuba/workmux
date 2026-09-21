@@ -377,6 +377,49 @@ class TestWorktreePrefix:
         assert (worktrees_dir / expected_handle).is_dir()
         assert_window_exists(env, f"{DEFAULT_WINDOW_PREFIX}{expected_handle}")
 
+    def test_add_expands_project_placeholder_in_worktree_prefix(
+        self,
+        mux_server: MuxEnvironment,
+        workmux_exe_path: Path,
+        mux_repo_path: Path,
+    ):
+        """Verifies `{project}` expands to the project name and that literal
+        separators in the prefix survive slugification."""
+        env = mux_server
+        branch_name = "feat/add-login-page"
+        expected_handle = f"{mux_repo_path.name}=feat-add-login-page"
+
+        write_workmux_config(mux_repo_path, worktree_prefix="{project}=")
+
+        run_workmux_add(env, workmux_exe_path, mux_repo_path, branch_name)
+
+        worktrees_dir = mux_repo_path.parent / f"{mux_repo_path.name}__worktrees"
+        assert (worktrees_dir / expected_handle).is_dir()
+        assert_window_exists(env, f"{DEFAULT_WINDOW_PREFIX}{expected_handle}")
+
+    def test_add_rejects_invalid_worktree_prefix(
+        self,
+        mux_server: MuxEnvironment,
+        workmux_exe_path: Path,
+        mux_repo_path: Path,
+    ):
+        """Verifies an unusable prefix fails with a clear error instead of being
+        silently sanitized."""
+        env = mux_server
+        write_workmux_config(mux_repo_path, worktree_prefix="bad prefix/")
+
+        result = run_workmux_command(
+            env,
+            workmux_exe_path,
+            mux_repo_path,
+            "add feature",
+            expect_fail=True,
+        )
+
+        assert "worktree_prefix" in result.stderr
+        worktrees_dir = mux_repo_path.parent / f"{mux_repo_path.name}__worktrees"
+        assert not worktrees_dir.exists() or not any(worktrees_dir.iterdir())
+
 
 class TestCombinedNamingOptions:
     """Tests for combined naming options."""

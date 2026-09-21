@@ -158,6 +158,51 @@ pub fn expand_project_placeholder(template: &str, project_root: &Path) -> Result
     Ok(template.replace(PROJECT_PLACEHOLDER, &project_name))
 }
 
+/// Characters allowed in a `worktree_prefix`, which ends up in both worktree
+/// directory names and multiplexer window/session names.
+pub fn is_worktree_prefix_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '=')
+}
+
+/// Normalize a project directory name for use inside a `worktree_prefix`.
+///
+/// Characters a repository directory may contain but a prefix may not (`.`,
+/// `:`, whitespace, non-ASCII) collapse into a single `-`, while `_` and case
+/// are preserved. A repository named `notes.nvim` becomes `notes-nvim`.
+fn sanitize_project_name_for_prefix(name: &str) -> String {
+    let mut sanitized = String::with_capacity(name.len());
+    for c in name.chars() {
+        if is_worktree_prefix_char(c) {
+            sanitized.push(c);
+        } else if !sanitized.ends_with('-') {
+            sanitized.push('-');
+        }
+    }
+    sanitized.trim_matches('-').to_string()
+}
+
+/// Replace `{project}` in a `worktree_prefix` template with a sanitized form
+/// of `project_root`'s directory name.
+///
+/// The expansion becomes both a directory name and a multiplexer name, so the
+/// project name is normalized while the literal part of the template (for
+/// example a `=` separator) is preserved verbatim.
+pub fn expand_project_placeholder_sanitized(template: &str, project_root: &Path) -> Result<String> {
+    let project_name = project_root
+        .file_name()
+        .ok_or_else(|| {
+            anyhow!(
+                "Could not determine project name from path: {}",
+                project_root.display()
+            )
+        })?
+        .to_string_lossy();
+    Ok(template.replace(
+        PROJECT_PLACEHOLDER,
+        &sanitize_project_name_for_prefix(&project_name),
+    ))
+}
+
 /// Expand a `worktree_dir` template against a project root.
 ///
 /// Supported syntax:
@@ -324,6 +369,41 @@ mod tests {
         let project = PathBuf::from("/x/y/myproj");
         let expanded = expand_project_placeholder("wm-", &project).unwrap();
         assert_eq!(expanded, "wm-");
+    }
+
+    #[test]
+    fn expand_project_placeholder_sanitized_normalizes_project_name() {
+        let project = PathBuf::from("/x/y/notes.nvim");
+        let expanded = expand_project_placeholder_sanitized("{project}=", &project).unwrap();
+        assert_eq!(expanded, "notes-nvim=");
+    }
+
+    #[test]
+    fn expand_project_placeholder_sanitized_keeps_literal_separators() {
+        let project = PathBuf::from("/x/y/workmux");
+        let expanded = expand_project_placeholder_sanitized("{project}=", &project).unwrap();
+        assert_eq!(expanded, "workmux=");
+    }
+
+    #[test]
+    fn expand_project_placeholder_sanitized_preserves_underscore_and_case() {
+        let project = PathBuf::from("/x/y/My_Project");
+        let expanded = expand_project_placeholder_sanitized("{project}=", &project).unwrap();
+        assert_eq!(expanded, "My_Project=");
+    }
+
+    #[test]
+    fn expand_project_placeholder_sanitized_collapses_unsafe_runs() {
+        let project = PathBuf::from("/x/y/.dot  name..");
+        let expanded = expand_project_placeholder_sanitized("{project}=", &project).unwrap();
+        assert_eq!(expanded, "dot-name=");
+    }
+
+    #[test]
+    fn expand_project_placeholder_sanitized_leaves_plain_template_untouched() {
+        let project = PathBuf::from("/x/y/myproj");
+        let expanded = expand_project_placeholder_sanitized("web-", &project).unwrap();
+        assert_eq!(expanded, "web-");
     }
 
     #[test]
